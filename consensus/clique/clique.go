@@ -551,6 +551,13 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Difficulty = calcDifficulty(snap, signer)
 
 	// Ensure the extra data has all its components
+	// ---------------------------------------------------------
+	// [Custom] 흔적 남기기 (32Byte 제한)
+	vanity := make([]byte, extraVanity)
+	copy(vanity, []byte("Go-Ethereum(Geth) Core - velog!"))
+	header.Extra = vanity
+	// ---------------------------------------------------------
+
 	if len(header.Extra) < extraVanity {
 		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-len(header.Extra))...)
 	}
