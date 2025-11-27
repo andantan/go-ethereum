@@ -43,6 +43,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -52,6 +53,19 @@ const (
 	inmemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
 	wiggleTime = 500 * time.Millisecond // Random delay (per signer) to allow concurrent signers
+)
+
+// [Config] 토크노믹스 설정값
+// 나중에 토키노믹스가 바뀌면 여기만 수정하자.
+var (
+	// TreasuryAddress: 세금을 걷을 재단 지갑 주소
+	TreasuryAddress = common.HexToAddress("0x9999999999999999999999999999999999999999")
+
+	// BlockReward: 블록당 총 보상 (5 ETH)
+	BlockReward = new(uint256.Int).Mul(uint256.NewInt(5), uint256.NewInt(1e18))
+
+	// TaxRate: 세금 비율 (10%)
+	TaxRate = uint256.NewInt(10)
 )
 
 // Clique proof-of-authority protocol constants.
@@ -585,10 +599,40 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	return nil
 }
 
-// Finalize implements consensus.Engine. There is no post-transaction
-// consensus rules in clique, do nothing here.
 func (c *Clique) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header, withdrawals []*types.Withdrawal) {
-	// No block rewards in PoA, so the state remains as is
+	if header.Number.Uint64() <= 1 {
+		return
+	}
+
+	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	if parent == nil {
+		return
+	}
+
+	signer, err := ecrecover(parent, c.signatures)
+	if err != nil {
+		log.Warn("Failed to recover parent signer", "err", err)
+		return
+	}
+
+	// 1. 총 보상 (전역 변수 사용)
+	totalReward := new(uint256.Int).Set(BlockReward)
+
+	// 2. 세금 계산 (전역 변수 사용)
+	taxReward := new(uint256.Int).Div(totalReward, TaxRate)
+
+	// 3. 채굴자 몫 계산
+	minerReward := new(uint256.Int).Sub(totalReward, taxReward)
+
+	// 4. 지급 (전역 변수 사용)
+	state.AddBalance(signer, minerReward)
+	state.AddBalance(TreasuryAddress, taxReward)
+
+	// 로그 수정
+	log.Info("💰 Reward & Tax Distributed",
+		"Miner", signer.Hex(),
+		"Treasury", TreasuryAddress.Hex(),
+	)
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
